@@ -26,6 +26,8 @@ build.xml
 ant.properties
 local.properties
 project.properties
+# Put API key in gradle.properties. Nothing but comments in there now...
+gradle.properties
 
 # Eclipse project files
 .classpath
