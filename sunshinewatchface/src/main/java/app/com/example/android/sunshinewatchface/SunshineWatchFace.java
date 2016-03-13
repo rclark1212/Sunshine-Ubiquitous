@@ -32,10 +32,14 @@ import android.os.Message;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
+import android.util.Log;
+import android.view.Gravity;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 
@@ -44,12 +48,17 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class SunshineWatchFace extends CanvasWatchFaceService {
+    private static final String TAG = "Sunshine";
+
+    private static final Typeface BOLD_TYPEFACE =
+            Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD);
+
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
 
     /**
      * Update rate in milliseconds for interactive mode. We update once a second since seconds are
-     * displayed in interactive mode.
+     * displayed in interactive mode. Note - we could save power here and slow down updates.
      */
     private static final long INTERACTIVE_UPDATE_RATE_MS = TimeUnit.SECONDS.toMillis(1);
 
@@ -87,7 +96,18 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
-        Paint mTextPaint;
+        //Paint mTextPaint;
+        Paint mHourPaint;
+        Paint mMinutePaint;
+        Paint mDatePaint;
+        Paint mTempPaintHigh;
+        Paint mTempPaintLow;
+
+        int mWatchX = 150;
+        int mWatchY = 150;
+
+        boolean mbIsRound;
+
         boolean mAmbient;
         Time mTime;
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
@@ -99,8 +119,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         };
         int mTapCount;
 
-        float mXOffset;
-        float mYOffset;
+        float mYTimeOffset;
+        float mYDateOffset;
+        float mYSeperaterOffset;
+        float mYTempOffset;
+        float mXStartSep;
+        float mXEndSep;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -117,15 +141,21 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
                     .setAcceptsTapEvents(true)
+                    .setHotwordIndicatorGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL)
                     .build());
             Resources resources = SunshineWatchFace.this.getResources();
-            mYOffset = resources.getDimension(R.dimen.digital_y_offset);
 
             mBackgroundPaint = new Paint();
-            mBackgroundPaint.setColor(resources.getColor(R.color.background));
+            mBackgroundPaint.setColor(resources.getColor(R.color.primary));
 
-            mTextPaint = new Paint();
-            mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
+            //mTextPaint = new Paint();
+            //mTextPaint = createTextPaint(resources.getColor(R.color.primary_text_light));
+            //Set up the various paint resources...
+            mHourPaint = createTextPaint(resources.getColor(R.color.digital_text), BOLD_TYPEFACE);
+            mMinutePaint = createTextPaint(resources.getColor(R.color.digital_text));
+            mDatePaint = createTextPaint(resources.getColor(R.color.gray_text));
+            mTempPaintHigh = createTextPaint(resources.getColor(R.color.digital_text), BOLD_TYPEFACE);
+            mTempPaintLow = createTextPaint(resources.getColor(R.color.gray_text));
 
             mTime = new Time();
         }
@@ -140,6 +170,14 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             Paint paint = new Paint();
             paint.setColor(textColor);
             paint.setTypeface(NORMAL_TYPEFACE);
+            paint.setAntiAlias(true);
+            return paint;
+        }
+
+        private Paint createTextPaint(int defaultInteractiveColor, Typeface typeface) {
+            Paint paint = new Paint();
+            paint.setColor(defaultInteractiveColor);
+            paint.setTypeface(typeface);
             paint.setAntiAlias(true);
             return paint;
         }
@@ -180,19 +218,89 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             SunshineWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
         }
 
+        private void updateYOffsets() {
+            //Okay - we will need to use text height in the onDraw command. Instead of measuring
+            //text height all the time there, do it once here...
+            Resources resources = SunshineWatchFace.this.getResources();
+
+            float timeHeight;
+            float dateHeight;
+            String log;
+
+            Rect bounds = new Rect();
+            mHourPaint.getTextBounds("0", 0, 1, bounds);
+            timeHeight = bounds.height();
+            Log.v(TAG, String.format("tHeight=%d",(int)timeHeight));
+
+            mDatePaint.getTextBounds("0", 0, 1, bounds);
+            dateHeight = bounds.height();
+            Log.v(TAG, String.format("dHeight=%d",(int)dateHeight));
+
+            //And finally, use the above to calculate y offsets for each line...
+            mYSeperaterOffset = mWatchY/2;
+
+            //next date...
+            mYDateOffset = mYSeperaterOffset - dateHeight - resources.getDimension(R.dimen.digital_y_offset);
+
+            //next time...
+            mYTimeOffset = mYDateOffset - timeHeight - resources.getDimension(R.dimen.digital_y_spacing);
+
+            //next temp...
+            mYTempOffset = mYSeperaterOffset + resources.getDimension(R.dimen.digital_y_offset);
+
+            //finally calc start/end of sep X
+            mXStartSep = (mWatchX/2) - resources.getDimension(R.dimen.digital_y_offset);
+            mXEndSep = (mWatchX/2) + resources.getDimension(R.dimen.digital_y_offset);
+        }
+
+        @Override
+        public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+            super.onSurfaceChanged(holder, format, width, height);
+            Log.v(TAG, "onSurfaceChanged");
+
+            //need to capture x, y for centering...
+            mWatchX = width;
+            mWatchY = height;
+        }
+
         @Override
         public void onApplyWindowInsets(WindowInsets insets) {
             super.onApplyWindowInsets(insets);
 
+            Log.v(TAG, "onApplyWindowInsets");
+
             // Load resources that have alternate values for round watches.
             Resources resources = SunshineWatchFace.this.getResources();
-            boolean isRound = insets.isRound();
-            mXOffset = resources.getDimension(isRound
-                    ? R.dimen.digital_x_offset_round : R.dimen.digital_x_offset);
-            float textSize = resources.getDimension(isRound
+            boolean mbIsRound = insets.isRound();
+
+            //Want to center digital time in x-axis, offset in Y
+            //Want small date string centered just underneath and in gray
+            //Want centered seperator under that
+            //And want icon, high low after
+            //Centering strat is every line center justified in X
+            //For y, place seperator in middle.
+            //Then grow text with a Y offset from center...
+
+            //3 text sizes - time, date, temp
+            float textSizeTime = resources.getDimension(mbIsRound
                     ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
 
-            mTextPaint.setTextSize(textSize);
+            float textSizeDate = resources.getDimension(mbIsRound
+                    ? R.dimen.date_text_size_round : R.dimen.date_text_size);
+
+            float textSizeTemp = resources.getDimension(mbIsRound
+                    ? R.dimen.temp_text_size_round : R.dimen.temp_text_size);
+
+
+            //mTextPaint.setTextSize(textSize);
+            mHourPaint.setTextSize(textSizeTime);
+            mMinutePaint.setTextSize(textSizeTime);
+
+            mDatePaint.setTextSize(textSizeDate);
+            mTempPaintHigh.setTextSize(textSizeTemp);
+            mTempPaintLow.setTextSize(textSizeTemp);
+
+            updateYOffsets();
         }
 
         @Override
@@ -213,8 +321,13 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             if (mAmbient != inAmbientMode) {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
-                    mTextPaint.setAntiAlias(!inAmbientMode);
+                    //mTextPaint.setAntiAlias(!inAmbientMode);
+                    mHourPaint.setAntiAlias(!inAmbientMode);
+                    mMinutePaint.setAntiAlias(!inAmbientMode);
                 }
+
+                //Note - we don't have to update mBackground paint here for ambient as that is handled in onDraw...
+
                 invalidate();
             }
 
@@ -239,9 +352,11 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     break;
                 case TAP_TYPE_TAP:
                     // The user has completed the tap gesture.
+                    //FIXME
+                    /*
                     mTapCount++;
                     mBackgroundPaint.setColor(resources.getColor(mTapCount % 2 == 0 ?
-                            R.color.background : R.color.background2));
+                            R.color.background : R.color.background2)); */
                     break;
             }
             invalidate();
@@ -256,12 +371,39 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 canvas.drawRect(0, 0, bounds.width(), bounds.height(), mBackgroundPaint);
             }
 
-            // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
+            // Always paint time in every mode
+            // Always draw HH:MM. Draw HH as bold. :MM as normal.
             mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
-            canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+
+            String textHour = String.format("%d", mTime.hour);
+            String textMinute = String.format(":%02d", mTime.minute);
+
+            //calc center position
+            float hourWidth = mHourPaint.measureText(textHour);
+            float minuteWidth = mMinutePaint.measureText(textMinute);
+            float x = (mWatchX - hourWidth - minuteWidth)/2;
+
+            canvas.drawText(textHour, x, mYTimeOffset, mHourPaint);
+            x += hourWidth;
+            canvas.drawText(textMinute, x, mYTimeOffset, mMinutePaint);
+
+            //only paint date, temp if not in ambient mode
+            if (!isInAmbientMode()) {
+                //Paint it all!
+                //First get date
+                SimpleDateFormat sdf = new SimpleDateFormat(SunshineWatchFace.this.getResources().getString(R.string.date_format));
+                String date = sdf.format(Calendar.getInstance().getTime()); //yes, I could optimize here...
+
+                canvas.drawText(date.toUpperCase(), (mWatchX - mDatePaint.measureText(date.toUpperCase())) / 2, mYDateOffset, mDatePaint);
+
+                //draw seperator
+                canvas.drawLine(mXStartSep, mWatchY/2, mXEndSep, mWatchY/2, mDatePaint);
+
+                //draw temp
+                //for now use dummy data...
+
+            }
+
         }
 
         /**

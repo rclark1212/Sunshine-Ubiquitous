@@ -22,6 +22,13 @@ Getting Started
 This sample uses the Gradle build system.  To build this project, use the
 "gradlew build" command or use "Import Project" in Android Studio.
 
+Modifications
+-------------
+Add android wear watchface support. Details below.
+> Use watchfaces suggested by udacity project
+> Assign pending intent to watchfaces so if weather icon pressed, opens up
+sunshine on the mobile device.
+
 Support
 -------
 
