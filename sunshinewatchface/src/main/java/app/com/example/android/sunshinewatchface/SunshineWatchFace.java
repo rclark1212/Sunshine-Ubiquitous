@@ -26,6 +26,8 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.Icon;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -94,6 +96,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
     private class Engine extends CanvasWatchFaceService.Engine {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
+        final private static int UNKNOWN_TEMP = -1000;  //will never be -1000. Use this as flag
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         //Paint mTextPaint;
@@ -125,6 +128,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         float mYTempOffset;
         float mXStartSep;
         float mXEndSep;
+        float mIconSize;
+
+        //and the weather line
+        Drawable mWeatherIcon = null;
+        int mHighTemp = UNKNOWN_TEMP;
+        int mLowTemp = UNKNOWN_TEMP;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -141,7 +150,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
                     .setAcceptsTapEvents(true)
-                    .setHotwordIndicatorGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL)
+                    .setHotwordIndicatorGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL)    //okay - this kind of sucks. But best place is in center...
+                    .setViewProtectionMode(WatchFaceStyle.PROTECT_HOTWORD_INDICATOR | WatchFaceStyle.PROTECT_STATUS_BAR)
                     .build());
             Resources resources = SunshineWatchFace.this.getResources();
 
@@ -225,28 +235,42 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             float timeHeight;
             float dateHeight;
+            float tempHeight;
             String log;
 
+            //Normally use getTextSize for size of text. Problem though is it includes descenders...
+            //So do a better method.
             Rect bounds = new Rect();
+            //timeHeight = mHourPaint.getTextSize();
             mHourPaint.getTextBounds("0", 0, 1, bounds);
             timeHeight = bounds.height();
-            Log.v(TAG, String.format("tHeight=%d",(int)timeHeight));
+            Log.v(TAG, String.format("tiHeight=%d", (int) timeHeight));
 
+            //dateHeight = mDatePaint.getTextSize();
             mDatePaint.getTextBounds("0", 0, 1, bounds);
             dateHeight = bounds.height();
-            Log.v(TAG, String.format("dHeight=%d",(int)dateHeight));
+            Log.v(TAG, String.format("dHeight=%d", (int) dateHeight));
+
+            //tempHeight = mTempPaintHigh.getTextSize();
+            mTempPaintHigh.getTextBounds("0", 0, 1, bounds);
+            tempHeight = bounds.height();
+            Log.v(TAG, String.format("teHeight=%d",(int)tempHeight));
+
+            //And make icon size same as temp...
+            mIconSize = tempHeight;
 
             //And finally, use the above to calculate y offsets for each line...
+            //remember - text is bottom justified
             mYSeperaterOffset = mWatchY/2;
 
             //next date...
-            mYDateOffset = mYSeperaterOffset - dateHeight - resources.getDimension(R.dimen.digital_y_offset);
+            mYDateOffset = mYSeperaterOffset - resources.getDimension(R.dimen.digital_y_offset);
 
             //next time...
-            mYTimeOffset = mYDateOffset - timeHeight - resources.getDimension(R.dimen.digital_y_spacing);
+            mYTimeOffset = mYDateOffset - dateHeight - resources.getDimension(R.dimen.digital_y_spacing);
 
             //next temp...
-            mYTempOffset = mYSeperaterOffset + resources.getDimension(R.dimen.digital_y_offset);
+            mYTempOffset = mYSeperaterOffset + resources.getDimension(R.dimen.digital_y_offset) + tempHeight;
 
             //finally calc start/end of sep X
             mXStartSep = (mWatchX/2) - resources.getDimension(R.dimen.digital_y_offset);
@@ -400,10 +424,45 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 canvas.drawLine(mXStartSep, mWatchY/2, mXEndSep, mWatchY/2, mDatePaint);
 
                 //draw temp
-                //for now use dummy data...
+                String tempHigh;
+                String tempLow;
+
+                //Note - only need to check one temp for no data (valid data always comes in pairs)
+                if (mHighTemp == UNKNOWN_TEMP) {
+                    tempHigh = " ?°";
+                    tempLow = " ?°";
+                } else {
+                    tempHigh = String.format(" %d°", mHighTemp);
+                    tempLow = String.format(" %d°", mLowTemp);
+                }
+
+                //Grab the icon if one does not exist
+                if (mWeatherIcon == null) {
+                    mWeatherIcon = SunshineWatchFace.this.getResources().getDrawable(R.drawable.ic_muzei);
+                }
+
+                //Grr - the icons are not full size in sunshine (there is blank space around edges).
+                //To try to scale them to be same size as text, they need between 20% and 25% inflation.
+                //So go with 25% since I like images...
+                //And yes, for production app, would optimize by putting this in an execute once section
+                float iconAdjust = (0.25f * mIconSize)/2;
+
+                //figure out width...
+                x = mTempPaintHigh.measureText(tempHigh) + mTempPaintLow.measureText(tempLow) + mIconSize + 2*iconAdjust;
+
+                //set the bounds...
+                mWeatherIcon.setBounds(
+                        (int)(((mWatchX - x) / 2) - iconAdjust),
+                        (int)(mYTempOffset-mIconSize-iconAdjust),
+                        (int)(((mWatchX - x) / 2)+mIconSize+iconAdjust),
+                        (int)(mYTempOffset+iconAdjust));
+
+                //Draw
+                mWeatherIcon.draw(canvas);
+                canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize, mYTempOffset, mTempPaintHigh);
+                canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
 
             }
-
         }
 
         /**

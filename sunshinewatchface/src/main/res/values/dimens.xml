@@ -6,7 +6,8 @@
     <dimen name="date_text_size_round">16sp</dimen>
     <dimen name="temp_text_size">24sp</dimen>
     <dimen name="temp_text_size_round">24sp</dimen>
+    <dimen name="weather_icon_size">36dp</dimen>
 
-    <dimen name="digital_y_offset">10dp</dimen>
-    <dimen name="digital_y_spacing">0dp</dimen>
+    <dimen name="digital_y_offset">15dp</dimen>
+    <dimen name="digital_y_spacing">5dp</dimen>
 </resources>
