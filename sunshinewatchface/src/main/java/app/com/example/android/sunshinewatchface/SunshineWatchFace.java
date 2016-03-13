@@ -140,6 +140,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
         //and lets store a tag of the last time updated (if phone doesn't communicate for a day, we want to know...
         Time mTimeoutTime;
+        final private static long TIMEOUT_IN_HOURS = 24;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -174,10 +175,11 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mTempPaintLow = createTextPaint(resources.getColor(R.color.gray_text));
 
             mTime = new Time();
+            mTime.setToNow();
 
             //initialize the timeout timer
             mTimeoutTime = new Time();
-            mTimeoutTime.setToNow();
+            mTimeoutTime.set(mTime.toMillis(true) + TIMEOUT_IN_HOURS*60*60*1000);
         }
 
         @Override
