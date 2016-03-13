@@ -98,14 +98,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         final private static int UNKNOWN_TEMP = -1000;  //will never be -1000. Use this as flag
         boolean mRegisteredTimeZoneReceiver = false;
+
+        //Paint objects
         Paint mBackgroundPaint;
-        //Paint mTextPaint;
         Paint mHourPaint;
         Paint mMinutePaint;
         Paint mDatePaint;
         Paint mTempPaintHigh;
         Paint mTempPaintLow;
 
+        //watch face size
         int mWatchX = 150;
         int mWatchY = 150;
 
@@ -122,6 +124,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         };
         int mTapCount;
 
+        //offsets calculated for painting
         float mYTimeOffset;
         float mYDateOffset;
         float mYSeperaterOffset;
@@ -130,10 +133,13 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         float mXEndSep;
         float mIconSize;
 
-        //and the weather line
+        //and the weather line values (sent by phone, painted by watch
         Drawable mWeatherIcon = null;
         int mHighTemp = UNKNOWN_TEMP;
         int mLowTemp = UNKNOWN_TEMP;
+
+        //and lets store a tag of the last time updated (if phone doesn't communicate for a day, we want to know...
+        Time mTimeoutTime;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -168,6 +174,10 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mTempPaintLow = createTextPaint(resources.getColor(R.color.gray_text));
 
             mTime = new Time();
+
+            //initialize the timeout timer
+            mTimeoutTime = new Time();
+            mTimeoutTime.setToNow();
         }
 
         @Override
@@ -228,6 +238,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             SunshineWatchFace.this.unregisterReceiver(mTimeZoneReceiver);
         }
 
+        //
+        // This routine sets up drawing coordinates for the watch face. Only run once.
+        //
         private void updateYOffsets() {
             //Okay - we will need to use text height in the onDraw command. Instead of measuring
             //text height all the time there, do it once here...
@@ -423,46 +436,74 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 //draw seperator
                 canvas.drawLine(mXStartSep, mWatchY/2, mXEndSep, mWatchY/2, mDatePaint);
 
-                //draw temp
-                String tempHigh;
-                String tempLow;
-
-                //Note - only need to check one temp for no data (valid data always comes in pairs)
-                if (mHighTemp == UNKNOWN_TEMP) {
-                    tempHigh = " ?°";
-                    tempLow = " ?°";
-                } else {
-                    tempHigh = String.format(" %d°", mHighTemp);
-                    tempLow = String.format(" %d°", mLowTemp);
-                }
-
-                //Grab the icon if one does not exist
-                if (mWeatherIcon == null) {
-                    mWeatherIcon = SunshineWatchFace.this.getResources().getDrawable(R.drawable.ic_muzei);
-                }
-
-                //Grr - the icons are not full size in sunshine (there is blank space around edges).
-                //To try to scale them to be same size as text, they need between 20% and 25% inflation.
-                //So go with 25% since I like images...
-                //And yes, for production app, would optimize by putting this in an execute once section
-                float iconAdjust = (0.25f * mIconSize)/2;
-
-                //figure out width...
-                x = mTempPaintHigh.measureText(tempHigh) + mTempPaintLow.measureText(tempLow) + mIconSize + 2*iconAdjust;
-
-                //set the bounds...
-                mWeatherIcon.setBounds(
-                        (int)(((mWatchX - x) / 2) - iconAdjust),
-                        (int)(mYTempOffset-mIconSize-iconAdjust),
-                        (int)(((mWatchX - x) / 2)+mIconSize+iconAdjust),
-                        (int)(mYTempOffset+iconAdjust));
-
-                //Draw
-                mWeatherIcon.draw(canvas);
-                canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize, mYTempOffset, mTempPaintHigh);
-                canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
-
+                //draw temperature line
+                drawTemps(canvas);
             }
+        }
+
+        //
+        //  This routine draws the temp line items...
+        //
+        private void drawTemps(Canvas canvas) {
+
+            //draw temp
+            String tempHigh;
+            String tempLow;
+
+            if (resetPhoneData()) {
+                mHighTemp = UNKNOWN_TEMP;
+                mLowTemp = UNKNOWN_TEMP;
+                mWeatherIcon = null;
+            }
+
+            //Note - only need to check one temp for no data (valid data always comes in pairs)
+            if (mHighTemp == UNKNOWN_TEMP) {
+                tempHigh = " ?°";
+                tempLow = " ?°";
+            } else {
+                tempHigh = String.format(" %d°", mHighTemp);
+                tempLow = String.format(" %d°", mLowTemp);
+            }
+
+            //Grab the icon if one does not exist
+            if (mWeatherIcon == null) {
+                mWeatherIcon = SunshineWatchFace.this.getResources().getDrawable(R.drawable.ic_muzei);
+            }
+
+            //Grr - the icons are not full size in sunshine (there is blank space around edges).
+            //To try to scale them to be same size as text, they need between 20% and 25% inflation.
+            //So go with 25% since I like images...
+            //And yes, for production app, would optimize by putting this in an execute once section - floating point
+            //math multiply not cheap.
+            float iconAdjust = (0.25f * mIconSize)/2;
+
+            //figure out width...
+            float x = mTempPaintHigh.measureText(tempHigh) + mTempPaintLow.measureText(tempLow) + mIconSize + 2*iconAdjust;
+
+            //set the bounds...
+            mWeatherIcon.setBounds(
+                    (int)(((mWatchX - x) / 2) - iconAdjust),
+                    (int)(mYTempOffset-mIconSize-iconAdjust),
+                    (int)(((mWatchX - x) / 2)+mIconSize+iconAdjust),
+                    (int)(mYTempOffset+iconAdjust));
+
+            //Draw
+            mWeatherIcon.draw(canvas);
+            canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize, mYTempOffset, mTempPaintHigh);
+            canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
+
+        }
+
+        //
+        // This routine is a chance for the phone to reset its data.
+        // For this exercise, we will put in a very simple rule of >24 hours.
+        // This could also be done with a timer. But power savings would be minimal (integer math op
+        // and compare every time watch face comes up pretty trivial in the larger picture).
+        // Timeout time set in the message receiver.
+        //
+        private boolean resetPhoneData() {
+            if (mTime.after(mTimeoutTime)) return true;
+            return false;
         }
 
         /**
