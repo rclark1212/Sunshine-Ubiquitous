@@ -96,6 +96,11 @@ public class SettingsActivity extends PreferenceActivity
             if (prefIndex >= 0) {
                 preference.setSummary(listPreference.getEntries()[prefIndex]);
             }
+
+            //And force an update for android wear (units may have changed)...
+            SunshineSyncAdapter.mbUpdateOnce = true;
+            SunshineSyncAdapter.syncImmediately(getApplicationContext());
+
         } else if (key.equals(getString(R.string.pref_location_key))) {
             @SunshineSyncAdapter.LocationStatus int status = Utility.getLocationStatus(this);
             switch (status) {

@@ -85,7 +85,7 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
     //keep a copy of the googleapiclient around
     private GoogleApiClient mGoogleApiClient;
 
-    private static boolean mbUpdateOnce = true;
+    public static boolean mbUpdateOnce = true;
 
     private static final String[] NOTIFY_WEATHER_PROJECTION = new String[] {
             WeatherContract.WeatherEntry.COLUMN_WEATHER_ID,
@@ -454,10 +454,14 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
             double low = cursor.getDouble(INDEX_MIN_TEMP);
 
             //Okay - now we have current update. And last update. Do they match?
+            //convert to proper units first...
+            int convertHigh = Utility.formatTemperatureInt(context, high);
+            int convertLow = Utility.formatTemperatureInt(context, low);
+
             if (    mbUpdateOnce ||
                     (weatherId != lastConditions)
-                    || ((int)high != lastHighTemp)
-                    || ((int)low != lastLowTemp) ) {
+                    || (convertHigh != lastHighTemp)
+                    || (convertLow != lastLowTemp) ) {
                 //We have a change! (or is at launch)
                 //do we have a connection to api client?
                 if (mGoogleApiClient != null) {
@@ -467,8 +471,8 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
                         //Okay - update the data map
                         PutDataMapRequest putDataMapRequest = PutDataMapRequest.create(DATAITEM_PATH);
 
-                        putDataMapRequest.getDataMap().putInt(DATAITEM_HIGH_TEMP, Utility.formatTemperatureInt(context, high));
-                        putDataMapRequest.getDataMap().putInt(DATAITEM_LOW_TEMP, Utility.formatTemperatureInt(context, low));
+                        putDataMapRequest.getDataMap().putInt(DATAITEM_HIGH_TEMP, convertHigh);
+                        putDataMapRequest.getDataMap().putInt(DATAITEM_LOW_TEMP, convertLow);
 
                         PutDataRequest request = putDataMapRequest.asPutDataRequest();
                         request.setUrgent();    //might not really need to do this but for testing, required...
@@ -489,8 +493,8 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
 
                         //Finally, store the data sent in the preferences
                         SharedPreferences.Editor editor = prefs.edit();
-                        editor.putInt(lastHighWearKey, (int) high);
-                        editor.putInt(lastLowWearKey, (int) low);
+                        editor.putInt(lastHighWearKey, convertHigh);
+                        editor.putInt(lastLowWearKey, convertLow);
                         editor.putInt(lastConditionWearKey, weatherId);
                         editor.putLong(lastUpdateTimeWear, System.currentTimeMillis());
                         editor.commit();
