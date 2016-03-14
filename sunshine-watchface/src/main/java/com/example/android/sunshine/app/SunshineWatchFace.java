@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package app.com.example.android.sunshinewatchface;
+package com.example.android.sunshine.app;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -27,7 +27,6 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.Icon;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -38,6 +37,16 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Wearable;
 
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
@@ -50,13 +59,29 @@ import java.util.concurrent.TimeUnit;
  * low-bit ambient mode, the text is drawn without anti-aliasing in ambient mode.
  */
 public class SunshineWatchFace extends CanvasWatchFaceService {
-    private static final String TAG = "Sunshine";
+    private static final String TAG = "SunWatch";
 
     private static final Typeface BOLD_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD);
 
     private static final Typeface NORMAL_TYPEFACE =
             Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL);
+
+    //and lets store a tag of the last time updated (if phone doesn't communicate for a day, we want to know...
+    public static long mLastUpdateMillis;
+    final private static long TIMEOUT_IN_HOURS = 24;
+
+    //and the weather line values (sent by phone, painted by watch
+    final private static int UNKNOWN_TEMP = -1000;  //will never be -1000. Use this as flag
+    public static Drawable mWeatherIcon = null;
+    public static int mHighTemp = UNKNOWN_TEMP;
+    public static int mLowTemp = UNKNOWN_TEMP;
+
+    //And the data item tag
+    private final static String DATAITEM_PATH = "/sunshineWeather";
+    private final static String DATAITEM_LOW_TEMP = "low";
+    private final static String DATAITEM_HIGH_TEMP = "high";
+    private final static String DATAITEM_ICON = "icon";
 
     /**
      * Update rate in milliseconds for interactive mode. We update once a second since seconds are
@@ -94,9 +119,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
+    private class Engine extends CanvasWatchFaceService.Engine implements DataApi.DataListener,
+            GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
-        final private static int UNKNOWN_TEMP = -1000;  //will never be -1000. Use this as flag
         boolean mRegisteredTimeZoneReceiver = false;
 
         //Paint objects
@@ -133,20 +158,18 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         float mXEndSep;
         float mIconSize;
 
-        //and the weather line values (sent by phone, painted by watch
-        Drawable mWeatherIcon = null;
-        int mHighTemp = UNKNOWN_TEMP;
-        int mLowTemp = UNKNOWN_TEMP;
-
-        //and lets store a tag of the last time updated (if phone doesn't communicate for a day, we want to know...
-        Time mTimeoutTime;
-        final private static long TIMEOUT_IN_HOURS = 24;
-
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
          * disable anti-aliasing in ambient mode.
          */
         boolean mLowBitAmbient;
+
+        //And make api object
+        GoogleApiClient mGoogleApiClient = new GoogleApiClient.Builder(SunshineWatchFace.this)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .addApi(Wearable.API)
+                .build();
 
         @Override
         public void onCreate(SurfaceHolder holder) {
@@ -156,7 +179,6 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_VARIABLE)
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
-                    .setAcceptsTapEvents(true)
                     .setHotwordIndicatorGravity(Gravity.CENTER_VERTICAL | Gravity.CENTER_HORIZONTAL)    //okay - this kind of sucks. But best place is in center...
                     .setViewProtectionMode(WatchFaceStyle.PROTECT_HOTWORD_INDICATOR | WatchFaceStyle.PROTECT_STATUS_BAR)
                     .build());
@@ -178,8 +200,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mTime.setToNow();
 
             //initialize the timeout timer
-            mTimeoutTime = new Time();
-            mTimeoutTime.set(mTime.toMillis(true) + TIMEOUT_IN_HOURS*60*60*1000);
+            mLastUpdateMillis = System.currentTimeMillis();
         }
 
         @Override
@@ -209,6 +230,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             super.onVisibilityChanged(visible);
 
             if (visible) {
+                mGoogleApiClient.connect();
+
                 registerReceiver();
 
                 // Update time zone in case it changed while we weren't visible.
@@ -216,6 +239,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 mTime.setToNow();
             } else {
                 unregisterReceiver();
+
+                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
+                    Wearable.DataApi.removeListener(mGoogleApiClient, this);
+                    mGoogleApiClient.disconnect();
+                }
+
             }
 
             // Whether the timer should be running depends on whether we're visible (as well as
@@ -484,10 +513,10 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             //set the bounds...
             mWeatherIcon.setBounds(
-                    (int)(((mWatchX - x) / 2) - iconAdjust),
-                    (int)(mYTempOffset-mIconSize-iconAdjust),
-                    (int)(((mWatchX - x) / 2)+mIconSize+iconAdjust),
-                    (int)(mYTempOffset+iconAdjust));
+                    (int) (((mWatchX - x) / 2) - iconAdjust),
+                    (int) (mYTempOffset - mIconSize - iconAdjust),
+                    (int) (((mWatchX - x) / 2) + mIconSize + iconAdjust),
+                    (int) (mYTempOffset + iconAdjust));
 
             //Draw
             mWeatherIcon.draw(canvas);
@@ -504,8 +533,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         // Timeout time set in the message receiver.
         //
         private boolean resetPhoneData() {
-            if (mTime.after(mTimeoutTime)) return true;
-            return false;
+            if (System.currentTimeMillis() > (mLastUpdateMillis + TIMEOUT_IN_HOURS*60*60*1000)) {
+                Log.v(TAG, "resetDataTimeout");
+                return true;
+            } else {
+                return false;
+            }
         }
 
         /**
@@ -539,5 +572,68 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
         }
+
+        /*
+            Communication routines follow
+         */
+        @Override // DataApi.DataListener
+        public void onDataChanged(DataEventBuffer dataEvents) {
+            Log.v(TAG, "OnDataChanged");
+            for (DataEvent dataEvent : dataEvents) {
+                //if this event not a data changed, ignore
+                if (dataEvent.getType() != DataEvent.TYPE_CHANGED) {
+                    continue;
+                }
+
+                //if this event is not a recognized data item, ignore.
+                DataItem dataItem = dataEvent.getDataItem();
+                if (!dataItem.getUri().getPath().equals(DATAITEM_PATH)) {
+                    continue;
+                }
+
+                Log.v(TAG, "ourData");
+
+                DataMap weather = DataMapItem.fromDataItem(dataItem).getDataMap();
+
+                if (Log.isLoggable(TAG, Log.DEBUG)) {
+                    Log.d(TAG, "DataItem updated:" + weather);
+                }
+
+                //update our data
+                updateDataFromDataMap(weather);
+            }
+        }
+
+        //
+        // utility which grabs out our data from the our datamap
+        private void updateDataFromDataMap(DataMap weather) {
+            mLowTemp = weather.getInt(DATAITEM_LOW_TEMP);
+            mHighTemp = weather.getInt(DATAITEM_HIGH_TEMP);
+
+            //FIXME - need to recover icon
+        }
+
+
+        @Override  // GoogleApiClient.ConnectionCallbacks
+        public void onConnected(Bundle connectionHint) {
+            Log.v(TAG, "onConnected: " + connectionHint);
+            Wearable.DataApi.addListener(mGoogleApiClient, Engine.this);
+
+            //Was thinking I might have to grab data here but on second thought...
+            //there should be a data packet waiting for us since watch can only start
+            //once sunshine loaded. And since we are guaranteed delivery, should
+            //have a data packet waiting for us in all cases (including new installs).
+        }
+
+        @Override  // GoogleApiClient.ConnectionCallbacks
+        public void onConnectionSuspended(int cause) {
+            Log.v(TAG, "onConnectionSuspended: " + cause);
+        }
+
+        @Override  // GoogleApiClient.OnConnectionFailedListener
+        public void onConnectionFailed(ConnectionResult result) {
+            Log.v(TAG, "onConnectionFailed: " + result);
+        }
+
     }
 }

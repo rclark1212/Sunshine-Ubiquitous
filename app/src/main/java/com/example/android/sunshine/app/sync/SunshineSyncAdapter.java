@@ -24,6 +24,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.annotation.IntDef;
+import android.support.annotation.NonNull;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.TaskStackBuilder;
 import android.text.format.Time;
@@ -36,6 +37,17 @@ import com.example.android.sunshine.app.R;
 import com.example.android.sunshine.app.Utility;
 import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.MessageApi;
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
+import com.google.android.gms.wearable.Wearable;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -52,7 +64,7 @@ import java.net.URL;
 import java.util.Vector;
 import java.util.concurrent.ExecutionException;
 
-public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
+public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
     public final String LOG_TAG = SunshineSyncAdapter.class.getSimpleName();
     public static final String ACTION_DATA_UPDATED =
             "com.example.android.sunshine.app.ACTION_DATA_UPDATED";
@@ -63,6 +75,17 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     private static final long DAY_IN_MILLIS = 1000 * 60 * 60 * 24;
     private static final int WEATHER_NOTIFICATION_ID = 3004;
 
+    //And the data tag for android wear (note - we use data items rather than message. we really always want
+    //to have weather data on watch)
+    private final static String DATAITEM_PATH = "/sunshineWeather";
+    private final static String DATAITEM_LOW_TEMP = "low";
+    private final static String DATAITEM_HIGH_TEMP = "high";
+    private final static String DATAITEM_ICON = "icon";
+
+    //keep a copy of the googleapiclient around
+    private GoogleApiClient mGoogleApiClient;
+
+    private static boolean mbUpdateOnce = true;
 
     private static final String[] NOTIFY_WEATHER_PROJECTION = new String[] {
             WeatherContract.WeatherEntry.COLUMN_WEATHER_ID,
@@ -89,6 +112,16 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
 
     public SunshineSyncAdapter(Context context, boolean autoInitialize) {
         super(context, autoInitialize);
+
+        //lets also set up the google api client here
+        mGoogleApiClient = new GoogleApiClient.Builder(context)
+                .addApi(Wearable.API)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .build();
+
+        if (mGoogleApiClient != null)
+            mGoogleApiClient.connect();
     }
 
     @Override
@@ -347,9 +380,17 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 updateWidgets();
                 updateMuzei();
                 notifyWeather();
+                updateWear();
             }
             Log.d(LOG_TAG, "Sync Complete. " + cVVector.size() + " Inserted");
             setLocationStatus(getContext(), LOCATION_STATUS_OK);
+
+            //Note - we will want to force an initial update on start of weather app to get good
+            //data to watch if watch user had just connected. (reasonable to assume user would stop/start
+            //sunshine app to get data)
+            if (mbUpdateOnce) {
+                updateWear();
+            }
 
         } catch (JSONException e) {
             Log.e(LOG_TAG, e.getMessage(), e);
@@ -374,6 +415,92 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
             context.startService(new Intent(ACTION_DATA_UPDATED)
                     .setClass(context, WeatherMuzeiSource.class));
         }
+    }
+
+    //
+    //Will update wear with the current weather
+    //
+    private void updateWear() {
+        //unlike notifications where you don't want to spam...
+        //with wear, we only want to update if something has changed.
+        //so check current values against last values sent.
+        //however, we do have one possible problem. Using messages rather than data transfer.
+        //A message can be lost. So we also want to update every 30 minutes just in case.
+        Context context = getContext();
+
+        //So lets get the last data set sent to wear device
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+        String lastLowWearKey = context.getString(R.string.pref_last_low_temp_to_wear);
+        String lastHighWearKey = context.getString(R.string.pref_last_high_temp_to_wear);
+        String lastConditionWearKey = context.getString(R.string.pref_last_condition_to_wear);
+        String lastUpdateTimeWear = context.getString(R.string.pref_last_time_to_wear);
+
+        int lastLowTemp = prefs.getInt(lastLowWearKey, -1000);  //put in a default that won't match...
+        int lastHighTemp = prefs.getInt(lastHighWearKey, -1000);
+        int lastConditions = prefs.getInt(lastConditionWearKey, 0);
+        long lastUpdateTime = prefs.getLong(lastUpdateTimeWear, 0);
+
+        // Set up a query..
+        String locationQuery = Utility.getPreferredLocation(context);
+
+        Uri weatherUri = WeatherContract.WeatherEntry.buildWeatherLocationWithDate(locationQuery, System.currentTimeMillis());
+
+        // we'll query our contentProvider, as always
+        Cursor cursor = context.getContentResolver().query(weatherUri, NOTIFY_WEATHER_PROJECTION, null, null, null);
+
+        if (cursor.moveToFirst()) {
+            int weatherId = cursor.getInt(INDEX_WEATHER_ID);
+            double high = cursor.getDouble(INDEX_MAX_TEMP);
+            double low = cursor.getDouble(INDEX_MIN_TEMP);
+
+            //Okay - now we have current update. And last update. Do they match?
+            if (    mbUpdateOnce ||
+                    (weatherId != lastConditions)
+                    || ((int)high != lastHighTemp)
+                    || ((int)low != lastLowTemp) ) {
+                //We have a change! (or is at launch)
+                //do we have a connection to api client?
+                if (mGoogleApiClient != null) {
+                    if (mGoogleApiClient.isConnected()) {
+                        mbUpdateOnce = false;       //reset the flag
+
+                        //Okay - update the data map
+                        PutDataMapRequest putDataMapRequest = PutDataMapRequest.create(DATAITEM_PATH);
+
+                        putDataMapRequest.getDataMap().putInt(DATAITEM_HIGH_TEMP, Utility.formatTemperatureInt(context, high));
+                        putDataMapRequest.getDataMap().putInt(DATAITEM_LOW_TEMP, Utility.formatTemperatureInt(context, low));
+
+                        PutDataRequest request = putDataMapRequest.asPutDataRequest();
+                        request.setUrgent();    //might not really need to do this but for testing, required...
+
+                        Wearable.DataApi.putDataItem(mGoogleApiClient, request)
+                                .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
+                                    @Override
+                                    public void onResult(@NonNull DataApi.DataItemResult dataItemResult) {
+                                        if (!dataItemResult.getStatus().isSuccess()) {
+                                            Log.v(LOG_TAG, "Failed to put wear data");
+                                        } else {
+                                            Log.v(LOG_TAG, "Successful in putting wear data");
+                                        }
+                                    }
+                                });
+
+                        //FIXME - just allocate temp for now... Need to add icon
+
+                        //Finally, store the data sent in the preferences
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putInt(lastHighWearKey, (int) high);
+                        editor.putInt(lastLowWearKey, (int) low);
+                        editor.putInt(lastConditionWearKey, weatherId);
+                        editor.putLong(lastUpdateTimeWear, System.currentTimeMillis());
+                        editor.commit();
+
+                    }
+                }
+            }
+        }
+        //close off the cursor
+        cursor.close();
     }
 
     private void notifyWeather() {
@@ -635,5 +762,17 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
         SharedPreferences.Editor spe = sp.edit();
         spe.putInt(c.getString(R.string.pref_location_status_key), locationStatus);
         spe.commit();
+    }
+
+    @Override
+    public void onConnected(Bundle bundle) {
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+    }
+
+    @Override
+    public void onConnectionFailed(ConnectionResult connectionResult) {
     }
 }

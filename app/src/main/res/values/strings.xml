@@ -60,6 +60,12 @@
     <string name="pref_enable_notifications_false">Not Enabled</string>
     <string name="pref_enable_notifications_default" translatable="false">true</string>
 
+    <!-- strings for storing last data sent to wear devices -->
+    <string name="pref_last_low_temp_to_wear" translatable="false">last_low_to_wear</string>
+    <string name="pref_last_high_temp_to_wear" translatable="false">last_high_to_wear</string>
+    <string name="pref_last_condition_to_wear" translatable="false">last_condition_to_wear</string>
+    <string name="pref_last_time_to_wear" translatable="false">last_time_wear_updated</string>
+
     <!-- Strings for formatting weather-related data -->
 
     <!-- Label for the temperature units preference [CHAR LIMIT=30] -->

@@ -25,8 +25,7 @@ android {
 
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
-    debugWearApp project(path: ':sunshinewatchface', configuration: 'debug')
-    releaseWearApp project(path: ':sunshinewatchface', configuration: 'release')
+    wearApp project(':sunshine-watchface')
     compile 'com.github.bumptech.glide:glide:3.5.2'
     compile 'com.android.support:support-annotations:23.1.1'
     compile 'com.android.support:gridlayout-v7:23.1.1'

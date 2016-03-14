@@ -43,6 +43,15 @@ public class Utility {
                 .equals(context.getString(R.string.pref_units_metric));
     }
 
+    public static int formatTemperatureInt(Context context, double temperature) {
+        // Data stored in Celsius by default.  If user prefers to see in Fahrenheit, convert
+        // the values here.
+        if (!isMetric(context)) {
+            temperature = (temperature * 1.8) + 32;
+        }
+        return (int)(temperature+0.5);
+    }
+
     public static String formatTemperature(Context context, double temperature) {
         // Data stored in Celsius by default.  If user prefers to see in Fahrenheit, convert
         // the values here.
