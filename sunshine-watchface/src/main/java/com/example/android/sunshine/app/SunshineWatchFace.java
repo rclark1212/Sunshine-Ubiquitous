@@ -21,12 +21,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -40,6 +43,7 @@ import android.view.WindowInsets;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.Asset;
 import com.google.android.gms.wearable.DataApi;
 import com.google.android.gms.wearable.DataEvent;
 import com.google.android.gms.wearable.DataEventBuffer;
@@ -48,6 +52,8 @@ import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.DataMapItem;
 import com.google.android.gms.wearable.Wearable;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -73,15 +79,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
     //and the weather line values (sent by phone, painted by watch
     final private static int UNKNOWN_TEMP = -1000;  //will never be -1000. Use this as flag
-    public static Drawable mWeatherIcon = null;
+    public static Bitmap mWeatherIconBM = null;
     public static int mHighTemp = UNKNOWN_TEMP;
     public static int mLowTemp = UNKNOWN_TEMP;
 
-    //And the data item tag
-    private final static String DATAITEM_PATH = "/sunshineWeather";
-    private final static String DATAITEM_LOW_TEMP = "low";
-    private final static String DATAITEM_HIGH_TEMP = "high";
-    private final static String DATAITEM_ICON = "icon";
+    //And make api object
+    public static GoogleApiClient mGoogleApiClient;
 
     /**
      * Update rate in milliseconds for interactive mode. We update once a second since seconds are
@@ -119,7 +122,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine implements DataApi.DataListener,
+    private class Engine extends CanvasWatchFaceService.Engine implements
             GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
@@ -131,6 +134,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         Paint mDatePaint;
         Paint mTempPaintHigh;
         Paint mTempPaintLow;
+        Paint mBitmapPaint;
 
         //watch face size
         int mWatchX = 150;
@@ -164,16 +168,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
          */
         boolean mLowBitAmbient;
 
-        //And make api object
-        GoogleApiClient mGoogleApiClient = new GoogleApiClient.Builder(SunshineWatchFace.this)
-                .addConnectionCallbacks(this)
-                .addOnConnectionFailedListener(this)
-                .addApi(Wearable.API)
-                .build();
-
         @Override
         public void onCreate(SurfaceHolder holder) {
             super.onCreate(holder);
+
+            //set up the api client
+            mGoogleApiClient = new GoogleApiClient.Builder(SunshineWatchFace.this)
+                    .addConnectionCallbacks(this)
+                    .addOnConnectionFailedListener(this)
+                    .addApi(Wearable.API)
+                    .build();
 
             setWatchFaceStyle(new WatchFaceStyle.Builder(SunshineWatchFace.this)
                     .setCardPeekMode(WatchFaceStyle.PEEK_MODE_VARIABLE)
@@ -195,6 +199,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mDatePaint = createTextPaint(resources.getColor(R.color.gray_text));
             mTempPaintHigh = createTextPaint(resources.getColor(R.color.digital_text), BOLD_TYPEFACE);
             mTempPaintLow = createTextPaint(resources.getColor(R.color.gray_text));
+
+            //And bitmap paint - set up for high quality
+            mBitmapPaint = new Paint();
+            mBitmapPaint.setAntiAlias(true);
+            mBitmapPaint.setFilterBitmap(true);
+            mBitmapPaint.setDither(true);
 
             mTime = new Time();
             mTime.setToNow();
@@ -241,7 +251,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 unregisterReceiver();
 
                 if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
-                    Wearable.DataApi.removeListener(mGoogleApiClient, this);
+                    //if we wanted to have more data listeners, would removeListener here...
                     mGoogleApiClient.disconnect();
                 }
 
@@ -484,7 +494,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             if (resetPhoneData()) {
                 mHighTemp = UNKNOWN_TEMP;
                 mLowTemp = UNKNOWN_TEMP;
-                mWeatherIcon = null;
+                mWeatherIconBM = null;
             }
 
             //Note - only need to check one temp for no data (valid data always comes in pairs)
@@ -497,8 +507,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             }
 
             //Grab the icon if one does not exist
-            if (mWeatherIcon == null) {
-                mWeatherIcon = SunshineWatchFace.this.getResources().getDrawable(R.drawable.ic_muzei);
+            if (mWeatherIconBM == null) {
+                mWeatherIconBM = getBitmapFromDrawableResource(SunshineWatchFace.this, R.drawable.ic_muzei);
             }
 
             //Grr - the icons are not full size in sunshine (there is blank space around edges).
@@ -512,14 +522,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             float x = mTempPaintHigh.measureText(tempHigh) + mTempPaintLow.measureText(tempLow) + mIconSize + 2*iconAdjust;
 
             //set the bounds...
-            mWeatherIcon.setBounds(
-                    (int) (((mWatchX - x) / 2) - iconAdjust),
-                    (int) (mYTempOffset - mIconSize - iconAdjust),
-                    (int) (((mWatchX - x) / 2) + mIconSize + iconAdjust),
-                    (int) (mYTempOffset + iconAdjust));
+            Rect dest = new Rect();
+            dest.left = (int) (((mWatchX - x) / 2) - iconAdjust);
+            dest.right = (int) (((mWatchX - x) / 2) + mIconSize + iconAdjust);
+            dest.top = (int) (mYTempOffset - mIconSize - iconAdjust);
+            dest.bottom = (int) (mYTempOffset + iconAdjust);
 
-            //Draw
-            mWeatherIcon.draw(canvas);
+            //Draw - FIXME
+            //canvas.drawBitmap(mWeatherIconBM, (mWatchX-x)/2-iconAdjust, mYTempOffset - mIconSize - iconAdjust, mBitmapPaint);
+            canvas.drawBitmap(mWeatherIconBM, null, dest, mBitmapPaint);
+
             canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize, mYTempOffset, mTempPaintHigh);
             canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
 
@@ -573,53 +585,25 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             }
         }
 
-        /*
-            Communication routines follow
-         */
-        @Override // DataApi.DataListener
-        public void onDataChanged(DataEventBuffer dataEvents) {
-            Log.v(TAG, "OnDataChanged");
-            for (DataEvent dataEvent : dataEvents) {
-                //if this event not a data changed, ignore
-                if (dataEvent.getType() != DataEvent.TYPE_CHANGED) {
-                    continue;
-                }
+        //Handle loading default icon here...
+        public Bitmap getBitmapFromDrawableResource(Context context, int resourceId) {
+            //Want to load the right size bitmap
+            BitmapFactory.Options options = new BitmapFactory.Options();
 
-                //if this event is not a recognized data item, ignore.
-                DataItem dataItem = dataEvent.getDataItem();
-                if (!dataItem.getUri().getPath().equals(DATAITEM_PATH)) {
-                    continue;
-                }
+            //Lets try to scale this down to watch densities
+            options.inTargetDensity = 260;    //the average density for watches
+            options.inScaled = true;
 
-                Log.v(TAG, "ourData");
-
-                DataMap weather = DataMapItem.fromDataItem(dataItem).getDataMap();
-
-                if (Log.isLoggable(TAG, Log.DEBUG)) {
-                    Log.d(TAG, "DataItem updated:" + weather);
-                }
-
-                //update our data
-                updateDataFromDataMap(weather);
-            }
-        }
-
-        //
-        // utility which grabs out our data from the our datamap
-        private void updateDataFromDataMap(DataMap weather) {
-            mLowTemp = weather.getInt(DATAITEM_LOW_TEMP);
-            mHighTemp = weather.getInt(DATAITEM_HIGH_TEMP);
-
-            //FIXME - need to recover icon
+            return BitmapFactory.decodeResource(context.getResources(), resourceId, options);
         }
 
 
         @Override  // GoogleApiClient.ConnectionCallbacks
         public void onConnected(Bundle connectionHint) {
             Log.v(TAG, "onConnected: " + connectionHint);
-            Wearable.DataApi.addListener(mGoogleApiClient, Engine.this);
+            //if we want to have more listeners, would add wearable.dataapi.addlistener here.
 
-            //Was thinking I might have to grab data here but on second thought...
+            //Was thinking I might have to grab init data here but on second thought...
             //there should be a data packet waiting for us since watch can only start
             //once sunshine loaded. And since we are guaranteed delivery, should
             //have a data packet waiting for us in all cases (including new installs).

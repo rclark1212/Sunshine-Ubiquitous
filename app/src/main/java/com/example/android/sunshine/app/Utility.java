@@ -17,13 +17,19 @@ package com.example.android.sunshine.app;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.preference.PreferenceManager;
 import android.text.format.Time;
 
 import com.example.android.sunshine.app.sync.SunshineSyncAdapter;
+import com.google.android.gms.wearable.Asset;
 
+import java.io.ByteArrayOutputStream;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -207,6 +213,24 @@ public class Utility {
             direction = "NW";
         }
         return String.format(context.getString(windFormat), windSpeed, direction);
+    }
+
+    /*
+        Helper method to create an asset from a drawable resource
+     */
+    public static Asset createAssetFromDrawableResource(Context context, int resourceId) {
+        final ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+        //Want to load the right size bitmap
+        BitmapFactory.Options options = new BitmapFactory.Options();
+
+        //Lets try to scale this down to watch densities
+        options.inTargetDensity = 260;    //the average density for watches
+        options.inScaled = true;
+
+        Bitmap iconbm = BitmapFactory.decodeResource(context.getResources(), resourceId, options);
+
+        iconbm.compress(Bitmap.CompressFormat.PNG, 100, byteStream);
+        return Asset.createFromBytes(byteStream.toByteArray());
     }
 
     /**

@@ -26,8 +26,9 @@ Modifications
 -------------
 Add android wear watchface support. Details below.
 > Use watchfaces suggested by udacity project
-> Assign pending intent to watchfaces so if weather icon pressed, opens up
-sunshine on the mobile device.
+> Used data service (rather than message). The data transfer size is modest and
+we really want watch to reflect same data as on phone else user unhappiness
+> No watch controllable options - inherits all (like units) from phone.
 
 Support
 -------

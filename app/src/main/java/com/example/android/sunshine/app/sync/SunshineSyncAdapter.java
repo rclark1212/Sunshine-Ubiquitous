@@ -40,11 +40,8 @@ import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.Asset;
 import com.google.android.gms.wearable.DataApi;
-import com.google.android.gms.wearable.DataMap;
-import com.google.android.gms.wearable.MessageApi;
-import com.google.android.gms.wearable.Node;
-import com.google.android.gms.wearable.NodeApi;
 import com.google.android.gms.wearable.PutDataMapRequest;
 import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
@@ -80,7 +77,7 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
     private final static String DATAITEM_PATH = "/sunshineWeather";
     private final static String DATAITEM_LOW_TEMP = "low";
     private final static String DATAITEM_HIGH_TEMP = "high";
-    private final static String DATAITEM_ICON = "icon";
+    private final static String DATAITEM_ICONBM = "iconbm";
 
     //keep a copy of the googleapiclient around
     private GoogleApiClient mGoogleApiClient;
@@ -473,6 +470,11 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
 
                         putDataMapRequest.getDataMap().putInt(DATAITEM_HIGH_TEMP, convertHigh);
                         putDataMapRequest.getDataMap().putInt(DATAITEM_LOW_TEMP, convertLow);
+
+                        //grab the bitmap and shove in there as well...
+                        int icon_resource = Utility.getIconResourceForWeatherCondition(weatherId);
+                        Asset asset = Utility.createAssetFromDrawableResource(context, icon_resource);
+                        putDataMapRequest.getDataMap().putAsset(DATAITEM_ICONBM, asset);
 
                         PutDataRequest request = putDataMapRequest.asPutDataRequest();
                         request.setUrgent();    //might not really need to do this but for testing, required...
