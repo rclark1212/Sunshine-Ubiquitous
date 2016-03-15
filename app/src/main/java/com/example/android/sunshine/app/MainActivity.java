@@ -93,9 +93,6 @@ public class MainActivity extends AppCompatActivity implements ForecastFragment.
 
         SunshineSyncAdapter.initializeSyncAdapter(this);
 
-        //Force a sync on start
-        SunshineSyncAdapter.syncImmediately(this);
-
         // If Google Play Services is up to date, we'll want to register GCM. If it is not, we'll
         // skip the registration and this device will not receive any downstream messages from
         // our fake server. Because weather alerts are not a core feature of the app, this should

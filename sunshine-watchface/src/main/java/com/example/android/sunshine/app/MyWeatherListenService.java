@@ -33,7 +33,10 @@ public class MyWeatherListenService extends WearableListenerService {
      */
     @Override // DataApi.DataListener
     public void onDataChanged(DataEventBuffer dataEvents) {
-        Log.v(TAG, "OnDataChanged");
+        if (Log.isLoggable(TAG, Log.DEBUG)) {
+            Log.d(TAG, "OnDataChanged");
+        }
+
         for (DataEvent dataEvent : dataEvents) {
             //if this event not a data changed, ignore
             if (dataEvent.getType() != DataEvent.TYPE_CHANGED) {
@@ -46,7 +49,9 @@ public class MyWeatherListenService extends WearableListenerService {
                 continue;
             }
 
-            Log.v(TAG, "ourData");
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "ourData");
+            }
 
             DataMap weather = DataMapItem.fromDataItem(dataItem).getDataMap();
 
@@ -87,7 +92,8 @@ public class MyWeatherListenService extends WearableListenerService {
 
         //Convert asset into a file descriptor and block until ready
         InputStream assetInputStream = Wearable.DataApi.getFdForAsset(SunshineWatchFace.mGoogleApiClient, asset).await().getInputStream();
-        SunshineWatchFace.mGoogleApiClient.disconnect();  //FIXME - should we disconnect here?
+        //SunshineWatchFace.mGoogleApiClient.disconnect();  //google code example shows a disconnect here - I think this is wrong.
+                                                            //stay connected.
 
         if (assetInputStream == null) {
             return;

@@ -117,14 +117,30 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
                 .addOnConnectionFailedListener(this)
                 .build();
 
-        if (mGoogleApiClient != null)
+        if (mGoogleApiClient != null) {
             mGoogleApiClient.connect();
+        }
+
+        //Note - we will want to force an initial update on start of weather app to get good
+        //data to watch if watch user had just re-connected. (reasonable to assume user would stop/start
+        //sunshine app to get data). Also note that we use this one-shot update for when user updates
+        //settings (like units to display in). After the one-shot, this will no longer trigger for session
+        //and the only updates will come if cp data store updates.
+        if (mbUpdateOnce) {
+            updateWear();
+        }
     }
 
     @Override
     public void onPerformSync(Account account, Bundle extras, String authority, ContentProviderClient provider, SyncResult syncResult) {
         Log.d(LOG_TAG, "Starting sync");
         String locationQuery = Utility.getPreferredLocation(getContext());
+
+        //Step1 - see if updateOnce flag set. If so, force update wear regardless of content provider/data.
+        //(it means that the settings page changed its units).
+        if (mbUpdateOnce) {
+            updateWear();
+        }
 
         // These two need to be declared outside the try/catch
         // so that they can be closed in the finally block.
@@ -209,6 +225,7 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
                     Log.e(LOG_TAG, "Error closing stream", e);
                 }
             }
+
         }
         return;
     }
@@ -381,13 +398,6 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter implements 
             }
             Log.d(LOG_TAG, "Sync Complete. " + cVVector.size() + " Inserted");
             setLocationStatus(getContext(), LOCATION_STATUS_OK);
-
-            //Note - we will want to force an initial update on start of weather app to get good
-            //data to watch if watch user had just connected. (reasonable to assume user would stop/start
-            //sunshine app to get data)
-            if (mbUpdateOnce) {
-                updateWear();
-            }
 
         } catch (JSONException e) {
             Log.e(LOG_TAG, e.getMessage(), e);

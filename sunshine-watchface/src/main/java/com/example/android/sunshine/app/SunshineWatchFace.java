@@ -298,17 +298,23 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             //timeHeight = mHourPaint.getTextSize();
             mHourPaint.getTextBounds("0", 0, 1, bounds);
             timeHeight = bounds.height();
-            Log.v(TAG, String.format("tiHeight=%d", (int) timeHeight));
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, String.format("tiHeight=%d", (int) timeHeight));
+            }
 
             //dateHeight = mDatePaint.getTextSize();
             mDatePaint.getTextBounds("0", 0, 1, bounds);
             dateHeight = bounds.height();
-            Log.v(TAG, String.format("dHeight=%d", (int) dateHeight));
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, String.format("dHeight=%d", (int) dateHeight));
+            }
 
             //tempHeight = mTempPaintHigh.getTextSize();
             mTempPaintHigh.getTextBounds("0", 0, 1, bounds);
             tempHeight = bounds.height();
-            Log.v(TAG, String.format("teHeight=%d",(int)tempHeight));
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, String.format("teHeight=%d", (int) tempHeight));
+            }
 
             //And make icon size same as temp...
             mIconSize = tempHeight;
@@ -334,7 +340,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         @Override
         public void onSurfaceChanged(SurfaceHolder holder, int format, int width, int height) {
             super.onSurfaceChanged(holder, format, width, height);
-            Log.v(TAG, "onSurfaceChanged");
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "onSurfaceChanged");
+            }
 
             //need to capture x, y for centering...
             mWatchX = width;
@@ -345,7 +353,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         public void onApplyWindowInsets(WindowInsets insets) {
             super.onApplyWindowInsets(insets);
 
-            Log.v(TAG, "onApplyWindowInsets");
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "onApplyWindowInsets");
+            }
 
             // Load resources that have alternate values for round watches.
             Resources resources = SunshineWatchFace.this.getResources();
@@ -491,12 +501,6 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             String tempHigh;
             String tempLow;
 
-            if (resetPhoneData()) {
-                mHighTemp = UNKNOWN_TEMP;
-                mLowTemp = UNKNOWN_TEMP;
-                mWeatherIconBM = null;
-            }
-
             //Note - only need to check one temp for no data (valid data always comes in pairs)
             if (mHighTemp == UNKNOWN_TEMP) {
                 tempHigh = " ?°";
@@ -514,6 +518,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             //Grr - the icons are not full size in sunshine (there is blank space around edges).
             //To try to scale them to be same size as text, they need between 20% and 25% inflation.
             //So go with 25% since I like images...
+            //and, as soon as you start inflating, will need to jiggle the offsets... So define a couple
+            //image offsets here - (need to push down icon by a few pixels and move to left a few pixels.
+            //yes - all magic numbers. But tested on a few watches (G, 360).
+            int iconOffsetX = 0;    //no need to shift in X
+            int iconOffsetY = 3;    //shift down 3 pixels in Y
+
             //And yes, for production app, would optimize by putting this in an execute once section - floating point
             //math multiply not cheap.
             float iconAdjust = (0.25f * mIconSize)/2;
@@ -523,35 +533,20 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             //set the bounds...
             Rect dest = new Rect();
-            dest.left = (int) (((mWatchX - x) / 2) - iconAdjust);
-            dest.right = (int) (((mWatchX - x) / 2) + mIconSize + iconAdjust);
-            dest.top = (int) (mYTempOffset - mIconSize - iconAdjust);
-            dest.bottom = (int) (mYTempOffset + iconAdjust);
+            dest.left = (int) (((mWatchX - x) / 2) - iconAdjust) + iconOffsetX;
+            dest.right = (int) (((mWatchX - x) / 2) + mIconSize + iconAdjust) + iconOffsetX;
+            dest.top = (int) (mYTempOffset - mIconSize - iconAdjust) + iconOffsetY;
+            dest.bottom = (int) (mYTempOffset + iconAdjust) + iconOffsetY;
 
             //Draw - FIXME
             //canvas.drawBitmap(mWeatherIconBM, (mWatchX-x)/2-iconAdjust, mYTempOffset - mIconSize - iconAdjust, mBitmapPaint);
             canvas.drawBitmap(mWeatherIconBM, null, dest, mBitmapPaint);
 
-            canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize, mYTempOffset, mTempPaintHigh);
-            canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
+            canvas.drawText(tempHigh, ((mWatchX-x)/2)+mIconSize + (int)iconAdjust, mYTempOffset, mTempPaintHigh);
+            canvas.drawText(tempLow, ((mWatchX-x)/2)+mIconSize + (int)iconAdjust + mTempPaintHigh.measureText(tempHigh), mYTempOffset, mTempPaintLow);
 
         }
 
-        //
-        // This routine is a chance for the phone to reset its data.
-        // For this exercise, we will put in a very simple rule of >24 hours.
-        // This could also be done with a timer. But power savings would be minimal (integer math op
-        // and compare every time watch face comes up pretty trivial in the larger picture).
-        // Timeout time set in the message receiver.
-        //
-        private boolean resetPhoneData() {
-            if (System.currentTimeMillis() > (mLastUpdateMillis + TIMEOUT_IN_HOURS*60*60*1000)) {
-                Log.v(TAG, "resetDataTimeout");
-                return true;
-            } else {
-                return false;
-            }
-        }
 
         /**
          * Starts the {@link #mUpdateTimeHandler} timer if it should be running and isn't currently
@@ -600,7 +595,9 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
         @Override  // GoogleApiClient.ConnectionCallbacks
         public void onConnected(Bundle connectionHint) {
-            Log.v(TAG, "onConnected: " + connectionHint);
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "onConnected: " + connectionHint);
+            }
             //if we want to have more listeners, would add wearable.dataapi.addlistener here.
 
             //Was thinking I might have to grab init data here but on second thought...
@@ -611,12 +608,16 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
         @Override  // GoogleApiClient.ConnectionCallbacks
         public void onConnectionSuspended(int cause) {
-            Log.v(TAG, "onConnectionSuspended: " + cause);
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "onConnectionSuspended: " + cause);
+            }
         }
 
         @Override  // GoogleApiClient.OnConnectionFailedListener
         public void onConnectionFailed(ConnectionResult result) {
-            Log.v(TAG, "onConnectionFailed: " + result);
+            if (Log.isLoggable(TAG, Log.DEBUG)) {
+                Log.d(TAG, "onConnectionFailed: " + result);
+            }
         }
 
     }
